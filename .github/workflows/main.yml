@@ -1,0 +1,77 @@
+name: Build project
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Update and install packages
+        run: |
+          dnf -y update
+          dnf -y install pkgconf-pkg-config which patch cmake ninja-build make qt6-qtwebsockets-devel hidapi-devel zlib-devel libpng-devel SDL2_net-devel wget zip git ShellCheck
+      - uses: actions/checkout@v4
+      - name: Check shell scripts
+        run: |
+          shellcheck -o all build.sh clean.sh pull_repos.sh
+      - name: Run build script
+        run: |
+          git config --global --add safe.directory /__w/simple64/simple64
+          ./build.sh
+        env:
+          NETPLAY_AUTH_CODE: ${{ secrets.NETPLAY_AUTH_CODE }}
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: MINGW64
+          install: >-
+            make
+            patch
+            git
+            zip
+            unzip
+          pacboy: >-
+            cmake:p
+            gcc:p
+            hidapi:p
+            freetype:p
+            libpng:p
+            SDL2:p
+            SDL2_net:p
+            qt6:p
+            7zip:p
+
+      - name: Run build script
+        run: msys2 -c 'export SIMPLE64_AUTOUPDATE=1; export NETPLAY_AUTH_CODE=${{ secrets.NETPLAY_AUTH_CODE }}; ./build.sh zip'
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: simple64-win64
+          path: simple64-*.zip
+  build-mac:
+    if: ${{ false }}
+    runs-on: macos-11
+    steps:
+      - uses: actions/checkout@v4
+      - name: brew update
+        run: |
+          brew update
+          brew upgrade || true
+          brew install hidapi sdl2_net sdl2 ninja molten-vk vulkan-loader qt@6
+      - name: Run build script
+        run: |
+          sudo sh ./build.sh
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: simple64-osx
+          path: simple64/simple64-*.dmg
