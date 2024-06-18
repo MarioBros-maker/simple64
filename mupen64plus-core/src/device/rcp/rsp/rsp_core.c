@@ -56,20 +56,21 @@ static void do_sp_dma(struct rsp_core* sp, const struct sp_dma* dma)
     {
         for(j=0; j<count; j++) {
             for(i=0; i<length; i++) {
-                dram[dramaddr^S8] = spmem[(memaddr & 0xfff)^S8];
+                if (dramaddr < sp->ri->rdram->dram_size)
+                    dram[dramaddr^S8] = spmem[(memaddr & 0xfff)^S8];
                 memaddr++;
                 dramaddr++;
             }
-
-            post_framebuffer_write(&sp->dp->fb, dramaddr - length, length);
             dramaddr+=skip;
         }
+
+        sp->regs[SP_MEM_ADDR_REG] = memaddr & 0xfff;
+        sp->regs[SP_DRAM_ADDR_REG] = dramaddr & 0xffffff;
+        sp->regs[SP_RD_LEN_REG] = 0xff8;
     }
     else
     {
         for(j=0; j<count; j++) {
-            pre_framebuffer_read(&sp->dp->fb, dramaddr);
-
             for(i=0; i<length; i++) {
                 spmem[(memaddr & 0xfff)^S8] = dram[dramaddr^S8];
                 memaddr++;
@@ -77,6 +78,10 @@ static void do_sp_dma(struct rsp_core* sp, const struct sp_dma* dma)
             }
             dramaddr+=skip;
         }
+
+        sp->regs[SP_MEM_ADDR_REG] = memaddr & 0xfff;
+        sp->regs[SP_DRAM_ADDR_REG] = dramaddr & 0xffffff;
+        sp->regs[SP_RD_LEN_REG] = 0xff8;
     }
     sp->regs[SP_MEM_ADDR_REG] = (memaddr & 0xfff) + (dma->memaddr & 0x1000);
     sp->regs[SP_DRAM_ADDR_REG] = dramaddr;
@@ -244,6 +249,8 @@ void poweron_rsp(struct rsp_core* sp)
     sp->rsp_wait = 0;
     sp->mi->r4300->cp0.interrupt_unsafe_state &= ~INTR_UNSAFE_RSP;
     sp->regs[SP_STATUS_REG] = 1;
+    sp->regs[SP_RD_LEN_REG] = 0xff8;
+    sp->regs[SP_WR_LEN_REG] = 0xff8;
 }
 
 
@@ -319,6 +326,10 @@ void read_rsp_regs2(void* opaque, uint32_t address, uint32_t* value)
     uint32_t reg = rsp_reg2(address);
 
     *value = sp->regs2[reg];
+
+    if (reg == SP_PC_REG)
+        *value &= 0xffc;
+
 }
 
 void write_rsp_regs2(void* opaque, uint32_t address, uint32_t value, uint32_t mask)
@@ -345,9 +356,7 @@ void do_SP_Task(struct rsp_core* sp)
     uint32_t sp_bit_set = sp->mi->regs[MI_INTR_REG] & MI_INTR_SP;
     uint32_t dp_bit_set = sp->mi->regs[MI_INTR_REG] & MI_INTR_DP;
 
-    unprotect_framebuffers(&sp->dp->fb);
     uint32_t rsp_cycles = rsp.doRspCycles(sp->first_run) / 2;
-    protect_framebuffers(&sp->dp->fb);
 
     if (sp->mi->regs[MI_INTR_REG] & MI_INTR_DP && !dp_bit_set)
     {
